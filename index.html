@@ -3,36 +3,19 @@
 <head>
     </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.4 (SOG)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.5 (SOG)</h1>
     <script>
-        // --- 1. CONFIGURATION (Unchanged) ---
-        // ...
-        
-        // --- 2. DATA STRUCTURE & GLOBALS (Unchanged) ---
-        // ...
-        
-        // --- 3. GEOMETRY FUNCTIONS (Unchanged) ---
-        // ...
-        
-        // --- 4. PERSISTENCE, CORE LOGIC, CHART (Unchanged) ---
-        // ...
-        
-        // --- 5. GEOLOCATION HANDLERS (Unchanged logic) ---
-        function handlePosition(position) {
-            const currentCoords = position.coords;
-            const timestamp = position.timestamp;
-            
-            // --- DEBUG LINE: If this function runs, this message should update frequently. ---
-            showStatus(`Fix received at: ${new Date(timestamp).toLocaleTimeString()}. Testing movement...`, false);
-            // -------------------------------------------------------------------------------
-            
-            let speedInKnots = 0;
-            // ... (rest of handlePosition remains the same) ...
-        }
-        
-        function handleError(error) { /* ... (Same) ... */ }
+        // --- 1. CONFIGURATION ---
+        const AVERAGE_WINDOW_10_SEC = 10;
+        const AVERAGE_WINDOW_30_SEC = 30;
+        const GRAPH_WINDOW_SEC = 60;
+        const MAX_SAILING_SPEED_KNOTS = 70.0; 
+        const KNOTS_PER_METER_PER_SECOND = 1.94384;
+        const EARTH_RADIUS_METERS = 6371000;
+        const DATA_KEY = 'sailingSpeedData';
+        // ... (remaining configuration and functions are unchanged) ...
 
-        // --- 6. INITIALIZATION (Timeout Change is here) ---
+        // --- 6. INITIALIZATION (MaximumAge Change is here) ---
 
         function startGpsWatch() {
             loadData();
@@ -45,9 +28,10 @@
                     handlePosition,
                     handleError,
                     {
-                        // Increased timeout to 30 seconds to ensure successful initial lock
-                        timeout: 30000,            
-                        maximumAge: 0             
+                        // Allows the browser to use a position fix up to 15 minutes old to start the loop.
+                        // This should immediately trigger handlePosition.
+                        timeout: 5000,            
+                        maximumAge: 900000             
                     }
                 );
             } else {
@@ -57,11 +41,7 @@
 
         document.addEventListener('DOMContentLoaded', startGpsWatch);
         
-        window.onbeforeunload = function() {
-            if (watchId) {
-                navigator.geolocation.clearWatch(watchId);
-            }
-        };
+        // ... (remaining script is unchanged) ...
     </script>
 </body>
 </html>
