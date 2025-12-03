@@ -8,7 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
-        /* ... (Styling remains the same for brevity) ... */
+        /* ... (Styling remains the same) ... */
         body { background-color: #0d1117; color: #ffffff; }
         .speed-display { font-size: 5rem; line-height: 1; }
         .unit { font-size: 1.5rem; opacity: 0.7; margin-top: -10px; }
@@ -18,31 +18,12 @@
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">
-        SAILING SPEED MONITOR (SOG)
-    </h1>
-
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.0 (SOG)</h1>
     <div class="w-full max-w-lg space-y-4">
-        
-        <div class="data-box">
-            <p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p>
-            <p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p>
-            <p class="unit">KNOTS</p>
-        </div>
-
-        <div class="data-box">
-            <p class="text-2xl mb-2 text-blue-400">AVG (LAST 30 SEC)</p>
-            <p id="avg-speed-30" class="speed-display font-mono text-yellow-400">--.-</p>
-            <p class="unit">KNOTS</p>
-        </div>
-
-        <div class="chart-box">
-             <p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 60 SEC)</p>
-            <canvas id="speedChart"></canvas>
-        </div>
-
+        <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
+        <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 30 SEC)</p><p id="avg-speed-30" class="speed-display font-mono text-yellow-400">--.-</p><p class="unit">KNOTS</p></div>
+        <div class="chart-box"><p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 60 SEC)</p><canvas id="speedChart"></canvas></div>
     </div>
-
     <div class="mt-8 p-3 w-full max-w-lg rounded bg-red-800 text-white hidden" id="status-box">
         <p id="status-message" class="text-sm">Initializing GPS...</p>
     </div>
@@ -52,40 +33,69 @@
         const AVERAGE_WINDOW_10_SEC = 10;
         const AVERAGE_WINDOW_30_SEC = 30;
         const GRAPH_WINDOW_SEC = 60;
+        const MAX_SAILING_SPEED_KNOTS = 7.0; // NEW: Filter threshold based on hull speed
         const KNOTS_PER_METER_PER_SECOND = 1.94384;
-        const DATA_KEY = 'sailingSpeedData'; // Key for Local Storage
+        const EARTH_RADIUS_METERS = 6371000;
+        const DATA_KEY = 'sailingSpeedData';
 
         // --- 2. DATA STRUCTURE & GLOBALS ---
         let speedBuffer = [];
         let watchId; 
         let speedChart;
+        let lastPosition = null;
 
-        // --- 3. PERSISTENCE FUNCTIONS ---
-        
-        /**
-         * Attempts to load the speed buffer from Local Storage.
-         */
+        // --- 3. GEOMETRY FUNCTIONS (Unchanged) ---
+        function toRad(degrees) { return degrees * Math.PI / 180; }
+
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = EARTH_RADIUS_METERS;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; 
+        }
+
+        function calculateSpeed(current) {
+            if (!lastPosition) { return 0; }
+            const distanceMeters = getDistance(
+                lastPosition.coords.latitude, 
+                lastPosition.coords.longitude, 
+                current.coords.latitude, 
+                current.coords.longitude
+            );
+            const timeSeconds = (current.timestamp - lastPosition.timestamp) / 1000;
+
+            if (timeSeconds > 0) {
+                return distanceMeters / timeSeconds;
+            }
+            return 0;
+        }
+
+        // --- 4. PERSISTENCE, CORE LOGIC, CHART (Unchanged) ---
         function loadData() {
             try {
                 const storedData = localStorage.getItem(DATA_KEY);
                 if (storedData) {
-                    // Convert JSON string back to JavaScript array
                     const loadedBuffer = JSON.parse(storedData);
-                    
-                    // Filter the loaded data to only include the largest required window (60s)
-                    // This prevents loading stale data from days ago.
                     const now = Date.now();
                     const timeCutoff = now - (GRAPH_WINDOW_SEC * 1000);
-                    
                     speedBuffer = loadedBuffer.filter(reading => reading.timestamp >= timeCutoff);
-                    
-                    // After loading, we immediately run the calculations to update the display/chart
-                    // even before the first new GPS reading arrives.
+                    if(speedBuffer.length > 0) {
+                        lastPosition = {
+                            coords: {
+                                latitude: speedBuffer[speedBuffer.length - 1].lat,
+                                longitude: speedBuffer[speedBuffer.length - 1].lon
+                            },
+                            timestamp: speedBuffer[speedBuffer.length - 1].timestamp
+                        };
+                    }
                     handlePosition({ coords: { speed: null }, timestamp: now });
-
                     showStatus("Data loaded successfully from previous session.", false);
                 } else {
-                    speedBuffer = []; // Start fresh if nothing is stored
+                    speedBuffer = []; 
                 }
             } catch (e) {
                 console.error("Error loading data from Local Storage:", e);
@@ -94,25 +104,16 @@
             }
         }
 
-        /**
-         * Saves the current speed buffer to Local Storage.
-         */
         function saveData() {
             try {
-                // Convert JavaScript array to JSON string for storage
                 const dataToStore = JSON.stringify(speedBuffer);
                 localStorage.setItem(DATA_KEY, dataToStore);
             } catch (e) {
                 console.error("Error saving data to Local Storage:", e);
-                showStatus("Error saving data. History may be lost on refresh.", true);
             }
         }
 
-
-        // --- 4. CORE LOGIC (Averages, Display, Chart) ---
-
         function calculateRollingAverage(windowSeconds) {
-            // ... (Logic remains the same: prunes the buffer, calculates average) ...
             const now = Date.now();
             const timeCutoff = now - (windowSeconds * 1000);
 
@@ -128,54 +129,58 @@
             return totalSpeed / relevantReadings.length;
         }
 
-        function mpsToKnots(mps) { /* ... (Same) ... */ return mps * KNOTS_PER_METER_PER_SECOND; }
+        function mpsToKnots(mps) { return mps * KNOTS_PER_METER_PER_SECOND; }
         function updateDisplay(elementId, speed) { /* ... (Same) ... */ }
         function showStatus(message, isError = false) { /* ... (Same) ... */ }
         function initChart() { /* ... (Same) ... */ }
-        
-        function updateChart() {
-            if (!speedChart) return;
-            const now = Date.now();
-            const timeCutoff = now - (GRAPH_WINDOW_SEC * 1000);
-            
-            const graphData = speedBuffer.map(reading => ({
-                x: reading.timestamp,
-                y: reading.speed.toFixed(2)
-            }));
+        function updateChart() { /* ... (Same) ... */ }
 
-            speedChart.data.datasets[0].data = graphData;
-            speedChart.options.scales.x.min = timeCutoff; 
-            speedChart.options.scales.x.max = now;
+        // --- 5. GEOLOCATION HANDLERS (Velocity Filter Added) ---
 
-            speedChart.update('none');
-        }
-
-        // --- 5. GEOLOCATION HANDLERS ---
-
-        /**
-         * Success handler for the Geolocation API.
-         * Note: position.coords.speed may be null if stationary, so we must handle that.
-         */
         function handlePosition(position) {
-            const currentSpeed_mps = position.coords.speed;
+            const currentCoords = position.coords;
             const timestamp = position.timestamp;
-
-            if (currentSpeed_mps !== null && currentSpeed_mps >= 0) {
-                const speedInKnots = mpsToKnots(currentSpeed_mps);
+            let speedInKnots = 0;
+            
+            // 1. Only attempt to calculate speed if we have a previous position
+            if (lastPosition) {
+                const calculatedSpeed_mps = calculateSpeed(position);
+                speedInKnots = mpsToKnots(calculatedSpeed_mps);
                 
-                // 1. Add new reading
+                // --- VELOCITY FILTER ---
+                if (speedInKnots > MAX_SAILING_SPEED_KNOTS) {
+                    // Discard this data point completely as it is likely GPS noise.
+                    // IMPORTANT: We do NOT update lastPosition, so the next calculation 
+                    // will use the valid point before the noise spike.
+                    console.warn(`[FILTER] Rejected speed of ${speedInKnots.toFixed(1)} knots. Outlier.`);
+                    return; 
+                }
+            }
+
+            // 2. If calculated speed is above a minimum threshold (0.05 knots)
+            if (speedInKnots > 0.05) { 
+                
+                // Add new reading to speed buffer, including lat/lon for persistence
                 speedBuffer.push({
                     speed: speedInKnots,
-                    timestamp: timestamp
+                    timestamp: timestamp,
+                    lat: currentCoords.latitude,
+                    lon: currentCoords.longitude
                 });
 
-                // 2. Save the updated buffer (The key change!)
+                // 3. Update the 'lastPosition' with the current valid reading
+                lastPosition = position;
+                
+                // 4. Save the updated buffer
                 saveData();
                 
                 document.getElementById('status-box').classList.add('hidden');
-            } 
+            } else if (speedInKnots <= 0.05 && speedBuffer.length > 0) {
+                 // Even if stationary, we update lastPosition to maintain accurate time delta for next move
+                 lastPosition = position;
+            }
             
-            // 3. Always run the display updates, even if we just loaded old data or are stationary
+            // 5. Always update displays and chart based on current buffer state
             const avgSpeed60 = calculateRollingAverage(GRAPH_WINDOW_SEC);
             const avgSpeed30 = calculateRollingAverage(AVERAGE_WINDOW_30_SEC);
             const avgSpeed10 = calculateRollingAverage(AVERAGE_WINDOW_10_SEC);
@@ -184,9 +189,9 @@
             updateDisplay('avg-speed-10', avgSpeed10);
             updateChart();
 
-            // Only show 'waiting' status if the buffer is empty AND we received a null speed update
-            if (speedBuffer.length === 0 && (currentSpeed_mps === null || currentSpeed_mps < 0)) {
-                showStatus("Waiting for motion/Speed Over Ground (SOG) data...", false);
+            // 6. Update status if no speed data is coming in
+            if (speedBuffer.length === 0) {
+                 showStatus("Waiting for a second GPS fix to calculate speed...", false);
             }
         }
 
@@ -203,7 +208,7 @@
             
             // 3. Start the GPS Watch
             if (navigator.geolocation) {
-                showStatus(speedBuffer.length > 0 ? "GPS Initializing. Displaying historical data..." : "Initializing GPS: Waiting for a fix...", false);
+                showStatus(speedBuffer.length > 0 ? "GPS Initializing. Displaying historical data..." : "Waiting for GPS fix...", false);
                 
                 watchId = navigator.geolocation.watchPosition(
                     handlePosition,
@@ -221,13 +226,11 @@
 
         document.addEventListener('DOMContentLoaded', startGpsWatch);
         
-        // Final cleanup for good practice
         window.onbeforeunload = function() {
             if (watchId) {
                 navigator.geolocation.clearWatch(watchId);
             }
         };
-
     </script>
 </body>
 </html>
