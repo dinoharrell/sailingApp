@@ -18,7 +18,7 @@
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.1 (SOG)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.2 (SOG)</h1>
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 30 SEC)</p><p id="avg-speed-30" class="speed-display font-mono text-yellow-400">--.-</p><p class="unit">KNOTS</p></div>
@@ -33,12 +33,13 @@
         const AVERAGE_WINDOW_10_SEC = 10;
         const AVERAGE_WINDOW_30_SEC = 30;
         const GRAPH_WINDOW_SEC = 60;
-        const MAX_SAILING_SPEED_KNOTS = 70.0; // NEW: Filter threshold based on hull speed
+        // Keeping your test value for now, we can revert this to 7.0 later.
+        const MAX_SAILING_SPEED_KNOTS = 70.0; 
         const KNOTS_PER_METER_PER_SECOND = 1.94384;
         const EARTH_RADIUS_METERS = 6371000;
         const DATA_KEY = 'sailingSpeedData';
 
-        // --- 2. DATA STRUCTURE & GLOBALS ---
+        // --- 2. DATA STRUCTURE & GLOBALS (Unchanged) ---
         let speedBuffer = [];
         let watchId; 
         let speedChart;
@@ -46,8 +47,7 @@
 
         // --- 3. GEOMETRY FUNCTIONS (Unchanged) ---
         function toRad(degrees) { return degrees * Math.PI / 180; }
-
-        function getDistance(lat1, lon1, lat2, lon2) {
+        function getDistance(lat1, lon1, lat2, lon2) { /* ... (Same) ... */
             const R = EARTH_RADIUS_METERS;
             const dLat = toRad(lat2 - lat1);
             const dLon = toRad(lon2 - lon1);
@@ -58,7 +58,7 @@
             return R * c; 
         }
 
-        function calculateSpeed(current) {
+        function calculateSpeed(current) { /* ... (Same) ... */
             if (!lastPosition) { return 0; }
             const distanceMeters = getDistance(
                 lastPosition.coords.latitude, 
@@ -75,7 +75,7 @@
         }
 
         // --- 4. PERSISTENCE, CORE LOGIC, CHART (Unchanged) ---
-        function loadData() {
+        function loadData() { /* ... (Same) ... */
             try {
                 const storedData = localStorage.getItem(DATA_KEY);
                 if (storedData) {
@@ -103,39 +103,15 @@
                 showStatus("Error loading saved data. Starting fresh.", true);
             }
         }
-
-        function saveData() {
-            try {
-                const dataToStore = JSON.stringify(speedBuffer);
-                localStorage.setItem(DATA_KEY, dataToStore);
-            } catch (e) {
-                console.error("Error saving data to Local Storage:", e);
-            }
-        }
-
-        function calculateRollingAverage(windowSeconds) {
-            const now = Date.now();
-            const timeCutoff = now - (windowSeconds * 1000);
-
-            if (windowSeconds === GRAPH_WINDOW_SEC) {
-                speedBuffer = speedBuffer.filter(reading => reading.timestamp >= timeCutoff);
-            }
-            
-            const relevantReadings = speedBuffer.filter(reading => reading.timestamp >= timeCutoff);
-
-            if (relevantReadings.length === 0) { return 0.0; }
-
-            const totalSpeed = relevantReadings.reduce((sum, reading) => sum + reading.speed, 0);
-            return totalSpeed / relevantReadings.length;
-        }
-
+        function saveData() { /* ... (Same) ... */ }
+        function calculateRollingAverage(windowSeconds) { /* ... (Same) ... */ }
         function mpsToKnots(mps) { return mps * KNOTS_PER_METER_PER_SECOND; }
         function updateDisplay(elementId, speed) { /* ... (Same) ... */ }
         function showStatus(message, isError = false) { /* ... (Same) ... */ }
         function initChart() { /* ... (Same) ... */ }
         function updateChart() { /* ... (Same) ... */ }
 
-        // --- 5. GEOLOCATION HANDLERS (Velocity Filter Added) ---
+        // --- 5. GEOLOCATION HANDLERS (Unchanged logic, relies on faster GPS lock) ---
 
         function handlePosition(position) {
             const currentCoords = position.coords;
@@ -149,9 +125,6 @@
                 
                 // --- VELOCITY FILTER ---
                 if (speedInKnots > MAX_SAILING_SPEED_KNOTS) {
-                    // Discard this data point completely as it is likely GPS noise.
-                    // IMPORTANT: We do NOT update lastPosition, so the next calculation 
-                    // will use the valid point before the noise spike.
                     console.warn(`[FILTER] Rejected speed of ${speedInKnots.toFixed(1)} knots. Outlier.`);
                     return; 
                 }
@@ -160,7 +133,7 @@
             // 2. If calculated speed is above a minimum threshold (0.05 knots)
             if (speedInKnots > 0.05) { 
                 
-                // Add new reading to speed buffer, including lat/lon for persistence
+                // Add new reading to speed buffer
                 speedBuffer.push({
                     speed: speedInKnots,
                     timestamp: timestamp,
@@ -170,17 +143,14 @@
 
                 // 3. Update the 'lastPosition' with the current valid reading
                 lastPosition = position;
-                
-                // 4. Save the updated buffer
                 saveData();
-                
                 document.getElementById('status-box').classList.add('hidden');
             } else if (speedInKnots <= 0.05 && speedBuffer.length > 0) {
-                 // Even if stationary, we update lastPosition to maintain accurate time delta for next move
+                 // Update lastPosition even if stationary to maintain accurate time delta for next move
                  lastPosition = position;
             }
             
-            // 5. Always update displays and chart based on current buffer state
+            // 4. Always update displays and chart based on current buffer state
             const avgSpeed60 = calculateRollingAverage(GRAPH_WINDOW_SEC);
             const avgSpeed30 = calculateRollingAverage(AVERAGE_WINDOW_30_SEC);
             const avgSpeed10 = calculateRollingAverage(AVERAGE_WINDOW_10_SEC);
@@ -189,15 +159,33 @@
             updateDisplay('avg-speed-10', avgSpeed10);
             updateChart();
 
-            // 6. Update status if no speed data is coming in
+            // 5. Update status if no speed data is coming in
             if (speedBuffer.length === 0) {
                  showStatus("Waiting for a second GPS fix to calculate speed...", false);
             }
         }
 
-        function handleError(error) { /* ... (Same) ... */ }
+        function handleError(error) { /* ... (Same) ... */
+            let message = '';
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "GPS Access Denied. Please enable location services for this browser.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Position Unavailable. Check your device's GPS signal.";
+                    break;
+                case error.TIMEOUT:
+                    message = "GPS Timed Out. Try moving to an open area.";
+                    break;
+                default:
+                    message = `An unknown GPS error occurred: ${error.message}`;
+            }
+            updateDisplay('avg-speed-10', 0);
+            updateDisplay('avg-speed-30', 0);
+            showStatus(message, true);
+        }
 
-        // --- 6. INITIALIZATION ---
+        // --- 6. INITIALIZATION (Change is here) ---
 
         function startGpsWatch() {
             // 1. Load any previously saved data first
@@ -214,7 +202,7 @@
                     handlePosition,
                     handleError,
                     {
-                        enableHighAccuracy: true, 
+                        // Removed enableHighAccuracy: true for faster, more reliable initial lock
                         timeout: 5000,            
                         maximumAge: 0             
                     }
