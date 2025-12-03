@@ -13,11 +13,13 @@
         .unit { font-size: 1.5rem; opacity: 0.7; margin-top: -10px; }
         .data-box { @apply text-center bg-gray-800 p-6 rounded-lg shadow-2xl w-full; margin-bottom: 1.5rem;}
         .chart-box { @apply bg-gray-800 p-4 rounded-lg shadow-2xl w-full; }
+        /* Style for the active status box to make it yellow/orange */
+        .bg-yellow-600 { background-color: #d97706; }
     </style>
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.6 (SOG)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.7 (SOG)</h1>
 
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
@@ -59,7 +61,7 @@
         }
 
         function calculateSpeed(current) {
-            if (!lastPosition) { return 0; }
+            // NOTE: lastPosition is checked outside this function now.
             const distanceMeters = getDistance(
                 lastPosition.coords.latitude, 
                 lastPosition.coords.longitude, 
@@ -74,7 +76,7 @@
             return 0;
         }
 
-        // --- 4. PERSISTENCE, CORE LOGIC, CHART ---
+        // --- 4. PERSISTENCE, CORE LOGIC, CHART UTILS ---
         function loadData() {
             try {
                 const storedData = localStorage.getItem(DATA_KEY);
@@ -145,40 +147,48 @@
             statusBox.classList.remove('hidden');
             
             if (isError) {
-                statusBox.classList.remove('bg-red-800');
-                statusBox.classList.add('bg-red-900'); // Ensure visibility for error
+                statusBox.classList.remove('bg-yellow-600');
+                statusBox.classList.add('bg-red-900'); 
             } else {
                 statusBox.classList.remove('bg-red-900');
-                statusBox.classList.add('bg-yellow-600'); // Use yellow for active status/info
+                statusBox.classList.add('bg-yellow-600'); 
             }
         }
 
-        function initChart() { /* ... (Chart init code) ... */ }
-        function updateChart() { /* ... (Chart update code) ... */ }
+        // Placeholder functions for chart code which would live here in a real implementation
+        function initChart() { /* Code to initialize Chart.js would go here */ }
+        function updateChart() { /* Code to update Chart.js data would go here */ }
 
 
-        // --- 5. GEOLOCATION HANDLERS ---
+        // --- 5. GEOLOCATION HANDLERS (The Fix is here!) ---
 
         function handlePosition(position) {
             const currentCoords = position.coords;
             const timestamp = position.timestamp;
             
-            // --- DEBUG LINE: If this function runs, this message should update frequently. ---
+            // 1. Status Update (Debugging/UX)
             showStatus(`Fix received at: ${new Date(timestamp).toLocaleTimeString()}. Testing movement...`, false);
-            // -------------------------------------------------------------------------------
             
-            let speedInKnots = 0;
-            
-            if (lastPosition) {
-                const calculatedSpeed_mps = calculateSpeed(position);
-                speedInKnots = mpsToKnots(calculatedSpeed_mps);
-                
-                if (speedInKnots > MAX_SAILING_SPEED_KNOTS) {
-                    console.warn(`[FILTER] Rejected speed of ${speedInKnots.toFixed(1)} knots. Outlier.`);
-                    return; 
-                }
+            // 2. CRITICAL FIX: Save the very first fix and exit, waiting for the next update.
+            if (lastPosition === null) {
+                lastPosition = position;
+                showStatus("Waiting for a second GPS fix to calculate speed...", false);
+                return; 
             }
 
+            let speedInKnots = 0;
+            
+            // 3. Speed Calculation
+            const calculatedSpeed_mps = calculateSpeed(position);
+            speedInKnots = mpsToKnots(calculatedSpeed_mps);
+                
+            // 4. Velocity Filter
+            if (speedInKnots > MAX_SAILING_SPEED_KNOTS) {
+                console.warn(`[FILTER] Rejected speed of ${speedInKnots.toFixed(1)} knots. Outlier.`);
+                return; // Discard point, do NOT update lastPosition
+            }
+
+            // 5. Data Saving and Display Update
             if (speedInKnots > 0.05) { 
                 
                 speedBuffer.push({
@@ -188,13 +198,17 @@
                     lon: currentCoords.longitude
                 });
 
+                // Update lastPosition ONLY after a valid, filtered data point is saved.
                 lastPosition = position;
                 saveData();
-                document.getElementById('status-box').classList.add('hidden');
-            } else if (speedInKnots <= 0.05 && speedBuffer.length > 0) {
+                document.getElementById('status-box').classList.add('hidden'); // Hide status when moving
+            } else {
+                // If speed is zero/very low, we still update lastPosition so future movements
+                // have an accurate starting point and time delta.
                  lastPosition = position;
             }
             
+            // 6. Display Update
             const avgSpeed60 = calculateRollingAverage(GRAPH_WINDOW_SEC);
             const avgSpeed30 = calculateRollingAverage(AVERAGE_WINDOW_30_SEC);
             const avgSpeed10 = calculateRollingAverage(AVERAGE_WINDOW_10_SEC);
@@ -203,6 +217,7 @@
             updateDisplay('avg-speed-10', avgSpeed10);
             updateChart();
 
+            // Status message fallback
             if (speedBuffer.length === 0) {
                  showStatus("Waiting for a second GPS fix to calculate speed...", false);
             }
@@ -228,11 +243,11 @@
             showStatus(message, true);
         }
 
-        // --- 6. INITIALIZATION (New two-phase approach) ---
+        // --- 6. INITIALIZATION ---
         
         function startWatchAfterInitialFix(position) {
             // Success: GPS is active, and we have a first fix!
-            // 1. Immediately process the first fix
+            // 1. Immediately process the first fix (sets lastPosition = position)
             handlePosition(position);
 
             // 2. Start the continuous watch
@@ -241,7 +256,7 @@
                 handleError,
                 {
                     timeout: 5000,
-                    maximumAge: 900000 // Allow cache for smooth updates if watch fails briefly
+                    maximumAge: 900000 
                 }
             );
         }
@@ -253,13 +268,13 @@
             if (navigator.geolocation) {
                 showStatus(speedBuffer.length > 0 ? "GPS Initializing. Displaying historical data..." : "Requesting initial GPS fix...", false);
                 
-                // First, use the single request API to force the GPS to activate
+                // Use getCurrentPosition to force GPS activation and get the first fix
                 navigator.geolocation.getCurrentPosition(
                     startWatchAfterInitialFix, // Success: start the watch
                     handleError,                 // Failure: show the error
                     {
-                        timeout: 10000, // Give it 10 seconds for the first fix
-                        maximumAge: 900000 // Allow a cached fix to ensure speed
+                        timeout: 10000, 
+                        maximumAge: 900000 
                     }
                 );
             } else {
@@ -274,11 +289,6 @@
                 navigator.geolocation.clearWatch(watchId);
             }
         };
-
-        // Placeholder functions for chart code which would live here in a real implementation
-        function initChart() { /* Code to initialize Chart.js would go here */ }
-        function updateChart() { /* Code to update Chart.js data would go here */ }
-
     </script>
 </body>
 </html>
