@@ -12,14 +12,19 @@
         .speed-display { font-size: 5rem; line-height: 1; }
         .unit { font-size: 1.5rem; opacity: 0.7; margin-top: -10px; }
         .data-box { @apply text-center bg-gray-800 p-6 rounded-lg shadow-2xl w-full; margin-bottom: 1.5rem;}
-        .chart-box { @apply bg-gray-800 p-4 rounded-lg shadow-2xl w-full; }
+        /* FIX: Added max-height to prevent vertical overflow/scrolling */
+        .chart-box { 
+            @apply bg-gray-800 p-4 rounded-lg shadow-2xl w-full; 
+            max-height: 350px; 
+            position: relative; 
+        }
         .bg-yellow-600 { background-color: #d97706; }
         .bg-green-700 { background-color: #047857; }
     </style>
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.9 (Graph & Time Filter)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v2.9 (Graph Scroll Fix)</h1>
 
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
@@ -38,7 +43,7 @@
         const MAX_SAILING_SPEED_KNOTS = 7.0;
         const MAX_ACCELERATION_KNOTS_PER_SEC = 1.0;
         const MIN_SPEED_KNOTS = 0.05;
-        const MIN_TIME_DELTA_SECONDS = 5.0; // NEW: Minimum time between accepted fixes
+        const MIN_TIME_DELTA_SECONDS = 5.0; // Minimum time between accepted fixes
         const KNOTS_PER_METER_PER_SECOND = 1.94384;
         const EARTH_RADIUS_METERS = 6371000;
         const DATA_KEY = 'sailingSpeedData';
@@ -49,7 +54,7 @@
         let speedChart;
         let lastPosition = null;
 
-        // --- 3. GEOMETRY FUNCTIONS (Unchanged) ---
+        // --- 3. GEOMETRY FUNCTIONS ---
         function toRad(degrees) { return degrees * Math.PI / 180; }
 
         function getDistance(lat1, lon1, lat2, lon2) {
@@ -240,7 +245,7 @@
         }
 
 
-        // --- 5. GEOLOCATION HANDLERS (Time Filter Added) ---
+        // --- 5. GEOLOCATION HANDLERS ---
 
         function handlePosition(position) {
             const currentCoords = position.coords;
@@ -262,7 +267,7 @@
             
             // --- FILTER CHECKS ---
 
-            // NEW 3. Time Delta Filter (must be done before other checks)
+            // 3. Time Delta Filter (must be done before other checks)
             if (time_sec < MIN_TIME_DELTA_SECONDS) {
                 showStatus(`GPS fix received, but time delta (${time_sec.toFixed(1)}s) is too short. Waiting for ${MIN_TIME_DELTA_SECONDS}s...`, false);
                 return; 
@@ -317,9 +322,27 @@
             updateChart(); // CHART UPDATE IS HERE
         }
 
-        function handleError(error) { /* ... (Unchanged) ... */ }
+        function handleError(error) {
+            let message = '';
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "GPS Access Denied. Please enable location services for this browser.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Position Unavailable. Check your device's GPS signal.";
+                    break;
+                case error.TIMEOUT:
+                    message = "GPS Timed Out. Try moving to an open area.";
+                    break;
+                default:
+                    message = `An unknown GPS error occurred: ${error.message}`;
+            }
+            updateDisplay('avg-speed-10', 0);
+            updateDisplay('avg-speed-30', 0);
+            showStatus(message, true);
+        }
 
-        // --- 6. INITIALIZATION (Unchanged) ---
+        // --- 6. INITIALIZATION ---
         
         function startWatchAfterInitialFix(position) {
             handlePosition(position);
