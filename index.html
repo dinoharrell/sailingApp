@@ -24,12 +24,12 @@
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v3.12 (7k)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v3.13 (7k)</h1>
 
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 30 SEC)</p><p id="avg-speed-30" class="speed-display font-mono text-yellow-400">--.-</p><p class="unit">KNOTS</p></div>
-        <div class="chart-box"><p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 60 SEC)</p><canvas id="speedChart"></canvas></div>
+        <div class="chart-box"><p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 300 SEC)</p><canvas id="speedChart"></canvas></div>
     </div>
     <div class="mt-8 p-3 w-full max-w-lg rounded bg-red-800 text-white" id="status-box">
         <p id="status-message" class="text-sm">Initializing GPS...</p>
@@ -39,7 +39,8 @@
         // --- 1. CONFIGURATION ---
         const AVERAGE_WINDOW_10_SEC = 10;
         const AVERAGE_WINDOW_30_SEC = 30;
-        const GRAPH_WINDOW_SEC = 60;
+        //dino-graph_window_sec might be only thing I need to change for longer/shorter graph duration? v3.13
+        const GRAPH_WINDOW_SEC = 300;
         const MAX_SAILING_SPEED_KNOTS = 7.0;
         const MAX_ACCELERATION_KNOTS_PER_SEC = 1.0;
         const MIN_SPEED_KNOTS = 0.05;
