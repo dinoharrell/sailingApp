@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sailing Speed Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better readability in bright conditions */
+        body {
+            background-color: #0d1117; /* Dark background */
+            color: #ffffff; /* White text */
+        }
+        .speed-display {
+            font-size: 5rem; /* Very large font for easy reading */
+            line-height: 1;
+        }
+        .unit {
+            font-size: 1.5rem;
+            opacity: 0.7;
+            margin-top: -10px;
+        }
+    </style>
+</head>
+<body class="p-4 flex flex-col items-center justify-center min-h-screen">
+
+    <h1 class="text-xl font-bold mb-6 text-gray-400">
+        SAILING SPEED MONITOR (SOG)
+    </h1>
+
+    <div class="text-center bg-gray-800 p-8 rounded-lg shadow-2xl w-full max-w-sm">
+        <p class="text-2xl mb-2 text-blue-400">
+            AVG (LAST 10 SEC)
+        </p>
+        <p id="avg-speed-10" class="speed-display font-mono text-green-400">
+            --.-
+        </p>
+        <p class="unit">KNOTS</p>
+    </div>
+
+    <div class="mt-8 p-3 w-full max-w-sm rounded bg-red-800 text-white hidden" id="status-box">
+        <p id="status-message" class="text-sm">Initializing GPS...</p>
+    </div>
+
+    <script>
+        // --- 1. CONFIGURATION ---
+        const TARGET_INTERVAL_MS = 1000; // Try to update every 1 second (1000ms)
+        const AVERAGE_WINDOW_SEC = 10; // The target rolling window is 10 seconds
+        const KNOTS_PER_METER_PER_SECOND = 1.94384; // Conversion factor
+
+        // --- 2. DATA STRUCTURE ---
+        // Array to store speed readings: [{ speed: 5.2, timestamp: 1700000000000 }]
+        let speedBuffer = [];
+        let watchId; // To hold the ID for the Geolocation watch process
+
+        // --- 3. HELPER FUNCTIONS ---
+
+        /**
+         * Cleans the buffer and calculates the rolling average speed.
+         */
+        function calculateRollingAverage() {
+            const now = Date.now();
+            const timeCutoff = now - (AVERAGE_WINDOW_SEC * 1000);
+
+            // 1. Filter out old readings (keeps only readings within the last 10 seconds)
+            speedBuffer = speedBuffer.filter(reading => reading.timestamp >= timeCutoff);
+
+            // 2. Calculate the average
+            if (speedBuffer.length === 0) {
+                return 0.0;
+            }
+
+            const totalSpeed = speedBuffer.reduce((sum, reading) => sum + reading.speed, 0);
+            return totalSpeed / speedBuffer.length;
+        }
+
+        /**
+         * Converts speed from meters/second (m/s) to knots.
+         * @param {number} mps - Speed in meters per second.
+         * @returns {number} Speed in knots.
+         */
+        function mpsToKnots(mps) {
+            return mps * KNOTS_PER_METER_PER_SECOND;
+        }
+
+        /**
+         * Updates the display with a calculated speed value.
+         * @param {number} speed - The speed in knots.
+         */
+        function updateDisplay(speed) {
+            const displayElement = document.getElementById('avg-speed-10');
+            
+            if (speed > 0) {
+                // Format to one decimal place, e.g., 4.5
+                displayElement.textContent = speed.toFixed(1);
+            } else if (speedBuffer.length > 0) {
+                 // Still show 0.0 if buffer has data but speed is minimal
+                displayElement.textContent = "0.0";
+            } else {
+                // Show initial placeholder
+                displayElement.textContent = "--.-";
+            }
+        }
+
+        /**
+         * Displays a status message to the user.
+         * @param {string} message - The message to display.
+         * @param {boolean} isError - True if it's an error message.
+         */
+        function showStatus(message, isError = false) {
+            const statusBox = document.getElementById('status-box');
+            const statusMessage = document.getElementById('status-message');
+            
+            statusMessage.textContent = message;
+            statusBox.classList.remove('hidden');
+            
+            if (isError) {
+                statusBox.classList.add('bg-red-800');
+                statusBox.classList.remove('bg-yellow-800');
+            } else {
+                statusBox.classList.add('bg-yellow-800');
+                statusBox.classList.remove('bg-red-800');
+            }
+            // Hide status message after a few seconds unless it's a persistent error
+            if (!isError) {
+                setTimeout(() => statusBox.classList.add('hidden'), 5000);
+            }
+        }
+        
+        // --- 4. GEOLOCATION HANDLERS ---
+
+        /**
+         * Success handler for the Geolocation API.
+         * @param {GeolocationPosition} position - The current GPS position object.
+         */
+        function handlePosition(position) {
+            const currentSpeed_mps = position.coords.speed;
+            const timestamp = position.timestamp;
+
+            // The speed property might be null or 0 if GPS hasn't locked yet.
+            if (currentSpeed_mps !== null && currentSpeed_mps >= 0) {
+                const speedInKnots = mpsToKnots(currentSpeed_mps);
+                
+                // Add the new reading to the buffer
+                speedBuffer.push({
+                    speed: speedInKnots,
+                    timestamp: timestamp
+                });
+
+                // Calculate and display the rolling average
+                const avgSpeed = calculateRollingAverage();
+                updateDisplay(avgSpeed);
+
+                // Hide the status box once data is flowing
+                document.getElementById('status-box').classList.add('hidden');
+
+            } else {
+                // This happens when the device has a fix, but speed data isn't available (e.g., stationary)
+                showStatus("Waiting for motion/Speed Over Ground (SOG) data...", false);
+            }
+        }
+
+        /**
+         * Error handler for the Geolocation API.
+         * @param {GeolocationPositionError} error - The error object.
+         */
+        function handleError(error) {
+            let message = '';
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "GPS Access Denied. Please enable location services for this browser.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Position Unavailable. Check your device's GPS signal.";
+                    break;
+                case error.TIMEOUT:
+                    message = "GPS Timed Out. Try moving to an open area.";
+                    break;
+                default:
+                    message = `An unknown GPS error occurred: ${error.message}`;
+            }
+            updateDisplay(0); // Clear display
+            showStatus(message, true);
+        }
+
+        // --- 5. INITIALIZATION ---
+
+        /**
+         * Starts the continuous watching of the GPS position.
+         */
+        function startGpsWatch() {
+            if (navigator.geolocation) {
+                showStatus("Initializing GPS: Waiting for a fix...", false);
+                
+                // Start watching the position
+                watchId = navigator.geolocation.watchPosition(
+                    handlePosition,
+                    handleError,
+                    {
+                        enableHighAccuracy: true, // Use the best available GPS data
+                        timeout: 5000,            // Wait up to 5 seconds for a successful reading
+                        maximumAge: 0             // Don't use cached positions
+                    }
+                );
+            } else {
+                handleError({
+                    code: -1,
+                    message: "Geolocation is not supported by this browser."
+                });
+            }
+        }
+
+        // Start the app when the page loads
+        document.addEventListener('DOMContentLoaded', startGpsWatch);
+        
+        // You might also want to stop watching when the user navigates away (optional cleanup)
+        window.onbeforeunload = function() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+        };
+
+    </script>
+</body>
+</html>
