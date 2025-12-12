@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sailing Speed Monitor v4.0</title>
+    <title>Sailing Speed Monitor v4.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -19,9 +19,9 @@
         }
         .log-box {
             @apply bg-gray-900 p-2 border border-gray-700 rounded-lg text-xs font-mono;
-            height: 150px; /* Fixed height to fit about 30 lines */
-            overflow-y: scroll; /* Makes it scrollable */
-            color: #a0a0a0; /* Light gray text for log details */
+            height: 60vh; /* Increased height as requested for maximal visibility */
+            overflow-y: scroll; 
+            color: #a0a0a0; 
         }
         .bg-yellow-600 { background-color: #d97706; }
         .bg-green-700 { background-color: #047857; }
@@ -30,7 +30,7 @@
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v4.0 (GPS SOG)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v4.2 (GPS SOG)</h1>
 
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
@@ -49,7 +49,7 @@
         const AVERAGE_WINDOW_10_SEC = 10;
         const AVERAGE_WINDOW_30_SEC = 30;
         const GRAPH_WINDOW_SEC = 60;
-        const MAX_SAILING_SPEED_KNOTS = 7.0;
+        // const MAX_SAILING_SPEED_KNOTS = 7.0; // REMOVED as requested (replaced by more robust filters)
         const MAX_ACCELERATION_KNOTS_PER_SEC = 1.0;
         const MIN_SPEED_KNOTS = 0.05;
         const MAX_HORIZONTAL_ACCURACY_METERS = 10.0;
@@ -93,7 +93,7 @@
                     }
                     // Pass a dummy object, as we only care about time_sec > 0 for acceleration check
                     handlePosition({ coords: { speed: 0, accuracy: 0, latitude: 0, longitude: 0 }, timestamp: now }, true); 
-                    showStatus("Data loaded successfully from previous session.", false, true);
+                    showStatus("Data loaded successfully.", false, true); // Simplified startup message
                 } else {
                     speedBuffer = []; 
                 }
@@ -139,12 +139,14 @@
             const statusMessage = document.getElementById('status-message');
             const logHistory = document.getElementById('log-history');
             
-            // 1. UPDATE MAIN STATUS BAR (Flash/Current Status)
+            // 1. UPDATE MAIN STATUS BAR 
             statusMessage.textContent = message;
             
             statusBox.classList.remove('hidden', 'bg-red-900', 'bg-yellow-600', 'bg-green-700');
             
+            let prefix = isError ? 'ERR:' : (isAccepted ? 'OK:' : 'NO:'); // New prefixes
             let logClass = ''; 
+            
             if (isError) {
                 statusBox.classList.add('bg-red-900');
                 logClass = 'text-red-400';
@@ -157,10 +159,12 @@
             }
 
             // 2. CREATE LOG ENTRY (Persistent History)
-            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            // Shortened timestamp to only show seconds
+            const timestamp = new Date().toLocaleTimeString('en-US', { second: '2-digit' }); 
             
             const newLogEntry = document.createElement('div');
-            newLogEntry.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> <span class="${logClass}">${message}</span>`;
+            // Log entry uses the prefix and shortened timestamp
+            newLogEntry.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> <span class="${logClass} font-bold">${prefix}</span> <span class="${logClass}">${message}</span>`;
             
             // Append the new entry to the top of the log (newest at the top)
             if (logHistory.firstChild) {
@@ -278,24 +282,24 @@
             // 1. CRITICAL FIX: Save the very first fix and exit.
             if (lastPosition === null) {
                 lastPosition = position;
-                showStatus("Waiting for a second GPS fix...", false);
+                showStatus("Waiting for 2nd fix...", false); // Simplified status
                 return; 
             }
 
             const time_sec = calculateTimeDelta(position);
             
             // --- FILTER 1: ACCURACY CHECK ---
-            // accuracy can be null if not provided by the device/OS
             if (currentCoords.accuracy === null || currentCoords.accuracy > MAX_HORIZONTAL_ACCURACY_METERS) {
                 const acc = currentCoords.accuracy === null ? 'N/A' : currentCoords.accuracy.toFixed(1) + 'm';
-                showStatus(`Fix rejected. Accuracy (${acc}) is worse than ${MAX_HORIZONTAL_ACCURACY_METERS.toFixed(1)}m.`, false);
+                // SIMPLIFIED LOG MESSAGE
+                showStatus(`Acc. ${acc} > ${MAX_HORIZONTAL_ACCURACY_METERS.toFixed(1)}m max.`, false); 
                 return;
             }
 
             // --- NEW CALCULATION: USE HARDWARE SPEED (SOG) ---
-            // speed can be null if not provided by the device/OS
             if (currentCoords.speed === null) {
-                showStatus("Fix rejected. GPS hardware did not provide Speed Over Ground (SOG).", false); 
+                // SIMPLIFIED LOG MESSAGE
+                showStatus("GPS did not provide SOG.", false); 
                 return; 
             }
             
@@ -304,11 +308,8 @@
             
             const lastAcceptedSpeed = speedBuffer.length > 0 ? speedBuffer[speedBuffer.length - 1].speed : 0.0;
             
-            // --- FILTER 2: Velocity Filter (Max Speed Check)
-            if (speedInKnots > MAX_SAILING_SPEED_KNOTS) {
-                showStatus(`Speed of ${speedInKnots.toFixed(1)} knots rejected. Exceeds MAX_SAILING_SPEED (${MAX_SAILING_SPEED_KNOTS.toFixed(1)}).`, false);
-                return; 
-            }
+            // --- FILTER 2: ABSOLUTE MAX SPEED CHECK - REMOVED! ---
+            // The check for MAX_SAILING_SPEED_KNOTS is removed to allow for a full speed range.
             
             // --- FILTER 3: Acceleration Filter (Max Change Check)
             if (time_sec > 0) {
@@ -316,7 +317,8 @@
                 const acceleration = speedChange / time_sec;
                 
                 if (acceleration > MAX_ACCELERATION_KNOTS_PER_SEC) {
-                    showStatus(`Speed change rejected. Acceleration too high (${acceleration.toFixed(2)} knots/sec).`, false);
+                    // SIMPLIFIED LOG MESSAGE
+                    showStatus(`Accel. ${acceleration.toFixed(2)} kn/s > ${MAX_ACCELERATION_KNOTS_PER_SEC.toFixed(1)} max.`, false);
                     return; 
                 }
             }
@@ -334,12 +336,14 @@
 
                 lastPosition = position;
                 saveData();
-                showStatus(`Valid GPS SOG of ${speedInKnots.toFixed(1)} knots accepted. Accuracy: ${currentCoords.accuracy.toFixed(1)}m.`, false, true); 
+                // SIMPLIFIED LOG MESSAGE
+                showStatus(`${speedInKnots.toFixed(1)} kn, ${currentCoords.accuracy.toFixed(1)}m accuracy.`, false, true); 
             } else {
                 // DATA REJECTED by MIN_SPEED_KNOTS filter
                 lastPosition = position; 
                 
-                showStatus(`SOG too low (${speedInKnots.toFixed(2)} knots). Assuming stationary.`, false);
+                // SIMPLIFIED LOG MESSAGE
+                showStatus(`Speed ${speedInKnots.toFixed(2)} kn (stationary).`, false);
             }
             
             // 6. Display Update
@@ -355,16 +359,16 @@
             let message = '';
             switch (error.code) {
                 case error.PERMISSION_DENIED:
-                    message = "GPS Access Denied (Code 1). Please enable location services for this browser/site.";
+                    message = "GPS Denied (Code 1).";
                     break;
                 case error.POSITION_UNAVAILABLE:
-                    message = "Position Unavailable (Code 2). Check your device's GPS signal.";
+                    message = "Position Unavailable (Code 2).";
                     break;
                 case error.TIMEOUT:
-                    message = "GPS Request Timed Out (Code 3). Try moving to an open area or check settings.";
+                    message = "GPS Timed Out (Code 3).";
                     break;
                 default:
-                    message = `An unknown GPS error occurred: ${error.message} (Code: ${error.code})`;
+                    message = `Unknown GPS error: ${error.message} (Code: ${error.code})`;
             }
             updateDisplay('avg-speed-10', 0);
             updateDisplay('avg-speed-30', 0);
@@ -392,7 +396,7 @@
             initChart(); 
             
             if (navigator.geolocation) {
-                showStatus(speedBuffer.length > 0 ? "GPS Initializing. Displaying historical data..." : "Requesting initial GPS fix...", false);
+                showStatus(speedBuffer.length > 0 ? "GPS Initializing. Historical data displayed." : "Requesting initial GPS fix...", false);
                 
                 navigator.geolocation.getCurrentPosition(
                     startWatchAfterInitialFix,
@@ -404,7 +408,7 @@
                     }
                 );
             } else {
-                handleError({ code: -1, message: "Geolocation is not supported by this browser." });
+                handleError({ code: -1, message: "Geolocation not supported." });
             }
         }
 
