@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sailing Speed Monitor v3.0</title>
+    <title>Sailing Speed Monitor v4.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -17,6 +17,12 @@
             max-height: 350px; 
             position: relative; 
         }
+        .log-box {
+            @apply bg-gray-900 p-2 border border-gray-700 rounded-lg text-xs font-mono;
+            height: 150px; /* Fixed height to fit about 30 lines */
+            overflow-y: scroll; /* Makes it scrollable */
+            color: #a0a0a0; /* Light gray text for log details */
+        }
         .bg-yellow-600 { background-color: #d97706; }
         .bg-green-700 { background-color: #047857; }
         .bg-red-900 { background-color: #7f1d1d; } /* Darker red for explicit errors */
@@ -24,27 +30,30 @@
 </head>
 <body class="p-4 flex flex-col items-center justify-center min-h-screen">
 
-    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v3.13 (7k)</h1>
+    <h1 class="text-xl font-bold mb-6 text-gray-400">SAILING SPEED MONITOR v4.0 (GPS SOG)</h1>
 
     <div class="w-full max-w-lg space-y-4">
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 10 SEC)</p><p id="avg-speed-10" class="speed-display font-mono text-green-400">--.-</p><p class="unit">KNOTS</p></div>
         <div class="data-box"><p class="text-2xl mb-2 text-blue-400">AVG (LAST 30 SEC)</p><p id="avg-speed-30" class="speed-display font-mono text-yellow-400">--.-</p><p class="unit">KNOTS</p></div>
-        <div class="chart-box"><p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 300 SEC)</p><canvas id="speedChart"></canvas></div>
+        <div class="chart-box"><p class="text-xl mb-2 text-blue-400 text-left">RAW SPEED (LAST 60 SEC)</p><canvas id="speedChart"></canvas></div>
     </div>
     <div class="mt-8 p-3 w-full max-w-lg rounded bg-red-800 text-white" id="status-box">
         <p id="status-message" class="text-sm">Initializing GPS...</p>
     </div>
+    
+    <div class="mt-2 w-full max-w-lg log-box" id="log-history">
+        </div>
 
     <script>
         // --- 1. CONFIGURATION ---
         const AVERAGE_WINDOW_10_SEC = 10;
         const AVERAGE_WINDOW_30_SEC = 30;
-        //dino-graph_window_sec might be only thing I need to change for longer/shorter graph duration? v3.13
-        const GRAPH_WINDOW_SEC = 300;
+        const GRAPH_WINDOW_SEC = 60;
         const MAX_SAILING_SPEED_KNOTS = 7.0;
         const MAX_ACCELERATION_KNOTS_PER_SEC = 1.0;
         const MIN_SPEED_KNOTS = 0.05;
         const MAX_HORIZONTAL_ACCURACY_METERS = 10.0;
+        const MAX_LOG_ENTRIES = 30; // Maximum number of entries to retain in the log box
         
         const KNOTS_PER_METER_PER_SECOND = 1.94384;
         const DATA_KEY = 'sailingSpeedData';
@@ -84,7 +93,7 @@
                     }
                     // Pass a dummy object, as we only care about time_sec > 0 for acceleration check
                     handlePosition({ coords: { speed: 0, accuracy: 0, latitude: 0, longitude: 0 }, timestamp: now }, true); 
-                    showStatus("Data loaded successfully from previous session.", false);
+                    showStatus("Data loaded successfully from previous session.", false, true);
                 } else {
                     speedBuffer = []; 
                 }
@@ -128,18 +137,45 @@
         function showStatus(message, isError = false, isAccepted = false) {
             const statusBox = document.getElementById('status-box');
             const statusMessage = document.getElementById('status-message');
+            const logHistory = document.getElementById('log-history');
             
+            // 1. UPDATE MAIN STATUS BAR (Flash/Current Status)
             statusMessage.textContent = message;
             
             statusBox.classList.remove('hidden', 'bg-red-900', 'bg-yellow-600', 'bg-green-700');
             
+            let logClass = ''; 
             if (isError) {
-                statusBox.classList.add('bg-red-900'); 
+                statusBox.classList.add('bg-red-900');
+                logClass = 'text-red-400';
             } else if (isAccepted) {
-                statusBox.classList.add('bg-green-700'); 
+                statusBox.classList.add('bg-green-700');
+                logClass = 'text-green-400';
             } else {
-                statusBox.classList.add('bg-yellow-600'); 
+                statusBox.classList.add('bg-yellow-600');
+                logClass = 'text-yellow-400';
             }
+
+            // 2. CREATE LOG ENTRY (Persistent History)
+            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            
+            const newLogEntry = document.createElement('div');
+            newLogEntry.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> <span class="${logClass}">${message}</span>`;
+            
+            // Append the new entry to the top of the log (newest at the top)
+            if (logHistory.firstChild) {
+                logHistory.insertBefore(newLogEntry, logHistory.firstChild);
+            } else {
+                logHistory.appendChild(newLogEntry);
+            }
+
+            // 3. LOG MANAGEMENT (Trim the log)
+            while (logHistory.children.length > MAX_LOG_ENTRIES) {
+                logHistory.removeChild(logHistory.lastChild);
+            }
+
+            // Scroll to the top to see the newest message
+            logHistory.scrollTop = 0;
         }
 
         function initChart() {
